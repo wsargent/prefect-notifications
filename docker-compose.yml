@@ -1,0 +1,166 @@
+
+services:
+
+  letta_db:
+    image: ankane/pgvector:v0.5.1
+    networks:
+      default:
+        aliases:
+          - pgvector_db
+          - letta-db
+    environment:
+      - POSTGRES_USER=${LETTA_PG_USER:-letta}
+      - POSTGRES_PASSWORD=${LETTA_PG_PASSWORD:-letta}
+      - POSTGRES_DB=${LETTA_PG_DB:-letta}
+    volumes:
+      - ./.persist/pgdata-test:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  prefect:
+    container_name: prefect
+    image: prefecthq/prefect:3-python3.12
+    restart: always
+    environment:
+      PREFECT_HOME: /data
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"  # Prefect server UI and API
+    volumes:
+      - prefect-data:/data  # Persistent storage
+      - .:/app  # Mount current directory
+
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: ntfy
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+      - ntfy-data:/var/lib/ntfy
+    environment:
+      - NTFY_BASE_URL=http://localhost
+      - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db
+      - NTFY_AUTH_FILE=/var/lib/ntfy/user.db
+      - NTFY_BEHIND_PROXY=true
+      - NTFY_UPSTREAM_BASE_URL=https://ntfy.sh
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    command: serve
+
+  letta:
+    image: letta/letta:0.8.8
+    ports:
+      - 8283:8283   
+    volumes:
+      - ./tools:/app/tools
+      - ./letta/letta_mcp_config.json:/root/.letta/mcp_config.json
+    environment:
+      LETTA_DEBUG: "${LETTA_DEBUG:-false}"
+      LETTA_PG_DB: ${LETTA_PG_DB:-letta}
+      LETTA_PG_USER: ${LETTA_PG_USER:-letta}
+      LETTA_PG_PASSWORD: ${LETTA_PG_PASSWORD:-letta}
+      LETTA_PG_HOST: pgvector_db
+      LETTA_PG_PORT: 5432
+      # https://docs.letta.com/guides/tool-execution/local
+      # Letta needs to create and link the virtual environment, so do not create a virtual environment manually
+      # with the same name
+      TOOL_EXEC_VENV_NAME: "env"
+      TOOL_EXEC_DIR: "/app/tools"
+      PREFECT_API_URL: "http://prefect:4200/api"
+      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/
+    restart: on-failure
+    depends_on:
+      - letta_db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8283/v1/health/"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+      
+
+  prefect-init:
+    image: prefecthq/prefect:3-python3.12
+    container_name: prefect-init
+    volumes:
+      - .:/app
+    environment:
+      PREFECT_API_URL: http://prefect:4200/api
+    depends_on:
+      prefect:
+        condition: service_started
+      ntfy:
+        condition: service_started
+    command: ["/bin/bash", "/app/tools/init_prefect.sh"]
+    restart: "no"
+      
+  letta-init:
+    image: letta/letta:0.8.8
+    container_name: letta-init
+    volumes:
+      - ./tools:/app/tools
+    environment:
+      LETTA_DEBUG: "${LETTA_DEBUG:-false}"
+      LETTA_PG_DB: ${LETTA_PG_DB:-letta}
+      LETTA_PG_USER: ${LETTA_PG_USER:-letta}
+      LETTA_PG_PASSWORD: ${LETTA_PG_PASSWORD:-letta}
+      LETTA_PG_HOST: pgvector_db
+      LETTA_PG_PORT: 5432
+      PREFECT_API_URL: "http://notify-prefect:4200/api"
+      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+    depends_on:
+      letta:
+        condition: service_healthy
+      prefect-init:
+        condition: service_completed_successfully
+    command: ["python", "/app/tools/init_letta.py"]
+    restart: "no"
+
+  # Open WebUI is the front-end UI to Letta
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:0.6.15
+    volumes:
+     - open-webui:/app/backend/data
+    ports:
+      - ${OPEN_WEBUI_PORT-3000}:8080
+    environment:
+      # https://docs.openwebui.com/getting-started/env-configuration/
+      - GLOBAL_LOG_LEVEL=$OPENWEBUI_LOG_LEVEL
+      # Disable admin login
+      - WEBUI_AUTH=false
+      # Enable the /docs endpoint for OpenAPI viewing
+      #- ENV=dev
+      # Prevent a langchain warning
+      - USER_AGENT=openwebui
+      # Set tags and titles explictly
+      - ENABLE_TAGS_GENERATION=false
+      - ENABLE_TITLE_GENERATION=false
+      # Disable some meaningless options
+      - ENABLE_EVALUATION_ARENA_MODELS=false
+      - ENABLE_AUTOCOMPLETE_GENERATION=false
+      - ENABLE_RETRIEVAL_QUERY_GENERATION=false
+      - ENABLE_FOLLOW_UP_GENERATION=false
+      # OpenAI selection should go to Hayhooks to show agents
+      - ENABLE_OPENAI_API=true
+      # RAG options can be transformers, ollama, or openai 
+      - RAG_EMBEDDING_ENGINE=openai
+    restart: unless-stopped
+    # https://docs.openwebui.com/getting-started/advanced-topics/monitoring/#basic-health-check-endpoint
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 5s
+
+volumes:
+  open-webui:
+  prefect-data:
+  ntfy-data:
+  ntfy-cache:
