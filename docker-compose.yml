@@ -1,36 +1,144 @@
 
 services:
 
-  letta_db:
-    image: ankane/pgvector:v0.5.1
-    networks:
-      default:
-        aliases:
-          - pgvector_db
-          - letta-db
+  ############################################
+  # Prefect
+  ############################################
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
     environment:
-      - POSTGRES_USER=${LETTA_PG_USER:-letta}
-      - POSTGRES_PASSWORD=${LETTA_PG_PASSWORD:-letta}
-      - POSTGRES_DB=${LETTA_PG_DB:-letta}
-    volumes:
-      - ./.persist/pgdata-test:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      POSTGRES_USER: prefect
+      POSTGRES_PASSWORD: prefect
+      POSTGRES_DB: prefect
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   prefect:
     container_name: prefect
-    image: prefecthq/prefect:3-python3.12
+    image: prefecthq/prefect:3-latest
     restart: always
     environment:
       PREFECT_HOME: /data
-    command: prefect server start --host 0.0.0.0
+      PREFECT_SERVER_API_HOST: "0.0.0.0"
+      PREFECT_DEBUG_MODE: "false"
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@postgres:5432/prefect
+      PREFECT_API_URL: http://localhost:4200/api
+      EXTRA_PIP_PACKAGES: prefect-aws
+      # MinIO configuration for Prefect
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_REGION: us-east-1
+    command: |
+      sh -c "
+        pip install prefect-aws &&
+        prefect server start --host 0.0.0.0 &
+        SERVER_PID=$$!
+        sleep 10
+        cd /app/prefect && /app/prefect/init_blocks.sh
+        echo 'Creating work pool...'
+        (prefect work-pool create default-docker-pool --type docker || echo 'Work pool already exists')
+        prefect work-pool update default-docker-pool --base-job-template /app/prefect/work-pool-template.json        
+        echo 'Deploying flows...'
+        /app/prefect/init_flow.sh
+        wait $$SERVER_PID
+      "
     ports:
       - "4200:4200"  # Prefect server UI and API
     volumes:
       - prefect-data:/data  # Persistent storage
-      - .:/app  # Mount current directory
+      - ./prefect:/app/prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health/')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+  
+  prefect-worker:
+    image: prefecthq/prefect:3-latest
+    restart: always
+    environment:
+      - PREFECT_API_URL=http://prefect:4200/api
+      - PREFECT_DEBUG_MODE=false
+      # MinIO configuration for worker
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_REGION=us-east-1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./prefect:/app/prefect
+    depends_on:
+      prefect:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install prefect-docker &&
+        echo 'Starting worker...' &&
+        prefect worker start --pool default-docker-pool --type docker
+      "
 
+  # MinIO for S3-compatible storage
+  minio:
+    image: quay.io/minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      retries: 3
+      start_period: 20s
+      timeout: 10s
+
+  # MinIO initialization - creates buckets automatically
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to be ready...';
+      sleep 5;
+      
+      echo 'Setting up MinIO client...';
+      mc alias set minio http://minio:9000 minioadmin minioadmin123;
+      
+      echo 'Creating buckets...';
+      mc mb minio/prefect-flows --ignore-existing;
+      mc mb minio/prefect-artifacts --ignore-existing;
+      mc mb minio/prefect-results --ignore-existing;
+      
+      echo 'Setting bucket policies...';
+      mc policy set public minio/prefect-flows;
+      mc policy set public minio/prefect-artifacts;
+      mc policy set public minio/prefect-results;
+      
+      echo 'MinIO initialization completed successfully!';
+      echo 'Available buckets:';
+      mc ls minio;
+      "
+    restart: "no"
+
+  ############################################
+  # Ntfy
+  ############################################
+      
   ntfy:
     image: binwiederhier/ntfy:latest
     container_name: ntfy
@@ -52,115 +160,28 @@ services:
           memory: 512M
     command: serve
 
-  letta:
-    image: letta/letta:0.8.8
+  ############################################
+  # MCP Server
+  ############################################
+  
+  prefect-mcp:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    container_name: prefect-mcp
     ports:
-      - 8283:8283   
-    volumes:
-      - ./tools:/app/tools
-      - ./letta/letta_mcp_config.json:/root/.letta/mcp_config.json
+      - "8000:8000"
     environment:
-      LETTA_DEBUG: "${LETTA_DEBUG:-false}"
-      LETTA_PG_DB: ${LETTA_PG_DB:-letta}
-      LETTA_PG_USER: ${LETTA_PG_USER:-letta}
-      LETTA_PG_PASSWORD: ${LETTA_PG_PASSWORD:-letta}
-      LETTA_PG_HOST: pgvector_db
-      LETTA_PG_PORT: 5432
-      # https://docs.letta.com/guides/tool-execution/local
-      # Letta needs to create and link the virtual environment, so do not create a virtual environment manually
-      # with the same name
-      TOOL_EXEC_VENV_NAME: "env"
-      TOOL_EXEC_DIR: "/app/tools"
-      PREFECT_API_URL: "http://prefect:4200/api"
-      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
-      OLLAMA_BASE_URL: http://host.docker.internal:11434/
-    restart: on-failure
-    depends_on:
-      - letta_db
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8283/v1/health/"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-      
-
-  prefect-init:
-    image: prefecthq/prefect:3-python3.12
-    container_name: prefect-init
-    volumes:
-      - .:/app
-    environment:
-      PREFECT_API_URL: http://prefect:4200/api
+      NTFY_SERVER: http://ntfy
+      PREFECT_API_URL: http://prefect:4200/api      
     depends_on:
       prefect:
         condition: service_started
-      ntfy:
-        condition: service_started
-    command: ["/bin/bash", "/app/tools/init_prefect.sh"]
-    restart: "no"
-      
-  letta-init:
-    image: letta/letta:0.8.8
-    container_name: letta-init
-    volumes:
-      - ./tools:/app/tools
-    environment:
-      LETTA_DEBUG: "${LETTA_DEBUG:-false}"
-      LETTA_PG_DB: ${LETTA_PG_DB:-letta}
-      LETTA_PG_USER: ${LETTA_PG_USER:-letta}
-      LETTA_PG_PASSWORD: ${LETTA_PG_PASSWORD:-letta}
-      LETTA_PG_HOST: pgvector_db
-      LETTA_PG_PORT: 5432
-      PREFECT_API_URL: "http://notify-prefect:4200/api"
-      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
-    depends_on:
-      letta:
-        condition: service_healthy
-      prefect-init:
-        condition: service_completed_successfully
-    command: ["python", "/app/tools/init_letta.py"]
-    restart: "no"
-
-  # Open WebUI is the front-end UI to Letta
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:0.6.15
-    volumes:
-     - open-webui:/app/backend/data
-    ports:
-      - ${OPEN_WEBUI_PORT-3000}:8080
-    environment:
-      # https://docs.openwebui.com/getting-started/env-configuration/
-      - GLOBAL_LOG_LEVEL=$OPENWEBUI_LOG_LEVEL
-      # Disable admin login
-      - WEBUI_AUTH=false
-      # Enable the /docs endpoint for OpenAPI viewing
-      #- ENV=dev
-      # Prevent a langchain warning
-      - USER_AGENT=openwebui
-      # Set tags and titles explictly
-      - ENABLE_TAGS_GENERATION=false
-      - ENABLE_TITLE_GENERATION=false
-      # Disable some meaningless options
-      - ENABLE_EVALUATION_ARENA_MODELS=false
-      - ENABLE_AUTOCOMPLETE_GENERATION=false
-      - ENABLE_RETRIEVAL_QUERY_GENERATION=false
-      - ENABLE_FOLLOW_UP_GENERATION=false
-      # OpenAI selection should go to Hayhooks to show agents
-      - ENABLE_OPENAI_API=true
-      # RAG options can be transformers, ollama, or openai 
-      - RAG_EMBEDDING_ENGINE=openai
-    restart: unless-stopped
-    # https://docs.openwebui.com/getting-started/advanced-topics/monitoring/#basic-health-check-endpoint
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 5s
+    restart: on-failure
 
 volumes:
-  open-webui:
+  postgres_data:
   prefect-data:
+  minio-data:
   ntfy-data:
   ntfy-cache:

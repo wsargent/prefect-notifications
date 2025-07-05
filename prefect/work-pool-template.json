@@ -1,0 +1,55 @@
+{
+    "variables": {
+        "type": "object",
+        "properties": {
+            "env": {
+                "type": "object",
+                "title": "Environment Variables",
+                "description": "Environment variables to set when starting a flow run.",
+                "additionalProperties": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}]
+                }
+            },
+            "name": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "title": "Name",
+                "default": null,
+                "description": "Name given to infrastructure created by the worker using this job configuration."
+            },
+            "image": {
+                "type": "string",
+                "title": "Image",
+                "examples": ["docker.io/prefecthq/prefect:3-latest"],
+                "description": "The image reference of a container image to use for created jobs. If not set, the latest Prefect image will be used.",
+                "default": "prefecthq/prefect:3-latest"
+            },
+            "networks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "title": "Networks",
+                "description": "Docker networks that created containers should be connected to.",
+                "default": ["prefect-notifications_default"]
+            },
+            "auto_remove": {
+                "type": "boolean",
+                "title": "Auto Remove",
+                "default": false,
+                "description": "If set, containers will be deleted on completion."
+            },
+            "stream_output": {
+                "type": "boolean",
+                "title": "Stream Output",
+                "default": true,
+                "description": "If set, the output from created containers will be streamed to local standard output."
+            }
+        }
+    },
+    "job_configuration": {
+        "env": "{{ env }}",
+        "name": "{{ name }}",
+        "image": "{{ image }}",
+        "networks": "{{ networks }}",
+        "auto_remove": "{{ auto_remove }}",
+        "stream_output": "{{ stream_output }}"
+    }
+}

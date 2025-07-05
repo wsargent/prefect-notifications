@@ -6,10 +6,13 @@ dist/
 wheels/
 *.egg-info
 
+.DS_Store
+
 .claude
 .env
+.persist
 
-tools/env
+letta/env
 
 # Virtual environments
 .venv

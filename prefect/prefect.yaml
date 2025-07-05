@@ -1,0 +1,41 @@
+# Welcome to your prefect.yaml file\! You can you this file for storing and managing
+# configuration for deploying your flows. We recommend committing this file to source
+# control along with your flow code.
+
+# Generic metadata about this project
+name: ntfy-notifications
+prefect-version: 3.0.0
+
+# build section allows you to manage and build docker images
+build:
+
+# push section allows you to manage if and how this project is uploaded to remote locations
+push:
+  - prefect_aws.deployments.steps.push_to_s3:
+      bucket: "{{ prefect.blocks.s3-bucket.minio-prefect-flows.bucket_name }}"
+      folder: ntfy-flow
+      credentials: "{{ prefect.blocks.aws-credentials.minio-credentials }}"
+
+# pull section allows you to provide instructions for cloning this project in remote locations
+pull:
+  - prefect.deployments.steps.run_shell_script:
+      script: |
+        pip install prefect-aws
+      stream_output: true
+  - prefect_aws.deployments.steps.pull_from_s3:
+      bucket: "{{ prefect.blocks.s3-bucket.minio-prefect-flows.bucket_name }}"
+      folder: ntfy-flow
+      credentials: "{{ prefect.blocks.aws-credentials.minio-credentials }}"
+
+# the deployments section allows you to provide configuration for deploying flows
+deployments:
+  - name: ntfy-default-deployment
+    version: 
+    tags: []
+    description: 
+    entrypoint: ntfy_flow.py:ntfy_default
+    parameters: {}
+    work_pool:
+      name: default-docker-pool
+      work_queue_name: 
+      job_variables: {}

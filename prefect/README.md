@@ -1,13 +1,14 @@
 # Prefect Notifications
 
-## Set Proxmox as Server
+https://github.com/rpeden/prefect-docker-compose
+
+## Set Prefect Server
 
 Configure prefect to use this server:
 
 ```
-(.venv) ❱ prefect config set PREFECT_API_URL=https://prefect-proxmox.tail88e86.ts.net/api
+(.venv) ❱ prefect config set PREFECT_API_URL=https://localhost:4200/api
 ```
-
 
 ## NTFY Block
 
@@ -49,9 +50,9 @@ Webhook URL: ntfys://ntfy-proxmox.mytailnet.ts.net/alerts
 └──────────────────────────────────────┴──────────────┴─────────────────┴──────────────────────────────┘
 ```
 
-## Running
+## Creating a Flow
 
-Once you have the block listed, you can load it and run `notify` on it.
+Once you have the block listed, you can create a flow:
 
 ```python
 from prefect import flow
@@ -62,24 +63,26 @@ from datetime import datetime
 from ntfy_webhook import NtfyWebHook
 
 @flow
-def ntfy_failure(body: str, subject: Optional[str] = None):  
+def ntfy_default(body: str, subject: Optional[str] = None):  
     """Flow that sends notifications via ntfy"""
     # Load the saved webhook
-    ntfy_webhook = NtfyWebHook.load("ntfy-failure")  
+    ntfy_webhook = NtfyWebHook.load("ntfy-default")  
     # Send notification
     ntfy_webhook.notify(body, subject=subject)
-
-@flow
-def ntfy_alerts(body: str, subject: Optional[str] = None):  
-    """Flow that sends notifications via ntfy"""
-    # Load the saved webhook
-    ntfy_webhook = NtfyWebHook.load("ntfy-alerts")  
-    # Send notification
-    ntfy_webhook.notify(body, subject=subject)
-
-
-if __name__ == "__main__":    
-    ntfy_alerts(f"Alert at {datetime.now()}", "Alert!!!")
-
-    ntfy_failure(f"Failure at {datetime.now()}", "Failure!!!")
 ```
+
+## Deploying
+
+You can create a deployment of the flow by creating a deployment, which will push the code to MinIO, a S3-compatible [blob storage](https://docs.prefect.io/v3/how-to-guides/deployments/store-flow-code#blob-storage) system.
+
+https://docs.prefect.io/v3/how-to-guides/deployments/prefect-yaml
+
+```
+push:
+- prefect_aws.deployments.steps.push_to_s3:
+    requires: prefect-aws>=0.3.0
+    bucket: my-bucket
+    folder: project-name
+    credentials: "{{ prefect.blocks.aws-credentials.dev-credentials }}"
+```
+
