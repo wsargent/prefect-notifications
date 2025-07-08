@@ -1,51 +1,34 @@
-### Prefect Notifications
+# Prefect Notifications
 
-This project is a notification system orchestrated by Prefect, with a custom MCP server providing an API to trigger notifications and manage Prefect deployments. It uses `ntfy` for push notifications.
+This project is an "out of the box" notification system orchestrated by [Prefect](https://prefect.io), with a custom MCP server providing an API to trigger notifications and manage deployments, using Docker Compose.
 
----
+Leveraging a workflow system is useful when you want to have your agent or LLM take actions in response to events, or on a scheduled basis, and notify you proactively.
 
-#### **Prefect Server and Worker**
+Prefect is great as a workflow system, because flows are written and stored in Python code, and can be scheduled and run in various complex ways.  It is straightforward to store flows in source control, and flows and tasks are not limited to the directed acyclic graph (DAG) model.
 
-*   **Role and Functionality:**
-    *   The **Prefect Server** is the central component for orchestrating and managing workflows (flows). As defined in `docker-compose.yml`, it runs the `prefecthq/prefect:3-latest` image, provides a web UI and an API on port `4200`, and uses a PostgreSQL database for state management. The server is responsible for scheduling flow runs, storing flow and deployment metadata, and tracking the state of all runs. Upon startup, it initializes custom Prefect blocks and deploys the notification flow from the `prefect/` directory.
-    *   The **Prefect Worker** (`prefect-worker` service) is responsible for executing the flow runs scheduled by the server. It also uses the `prefecthq/prefect:3-latest` image and is configured to connect to the Prefect server's API. It listens for work from a specific work pool (`default-docker-pool`) and executes the assigned tasks within a Docker environment, as indicated by its command and volume mounts in `docker-compose.yml`.
+## Running
 
-*   **Interaction:**
-    *   The Prefect Server and Worker operate in a classic agent-based architecture. The server schedules a flow run, and the worker picks it up from the work pool and executes the code. The worker communicates its status and results back to the server, which are then visible in the UI.
+```
+docker compose up --build
+```
 
----
+You can inspect the running services:
 
-#### **ntfy**
+* [Prefect Admin UI](http://localhost:4200)
+* [MinIO UI](http://localhost:9000)
+* [ntfy](http://localhost)
+* The MCP server is available at http://localhost:8000/sse and you can access it with [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) or [Context](https://github.com/indragiek/Context).
 
-*   **Role and Functionality:**
-    *   **`ntfy`** is a simple, open-source pub-sub notification service. In this project, it is defined as the `ntfy` service in `docker-compose.yml`. Its purpose is to receive notification requests and push them to subscribed clients (e.g., mobile phones or web browsers). It exposes an HTTP endpoint for this purpose.
+## Configuration
 
-*   **Integration with Prefect Flow:**
-    *   The integration is achieved through a custom Prefect block, `NtfyWebHook`, which is registered and configured as described in `prefect/README.md`. The `prefect/ntfy_flow.py` file defines the `ntfy_default` flow, which loads this pre-configured `NtfyWebHook` block and calls its `notify` method. This sends the `body` and `subject` of the notification to the `ntfy` server's topic, which then broadcasts it to subscribers.
+There's several parts to the Docker Compose file:
 
----
-
-#### **MCP Server**
-
-*   **Role and Functionality:**
-    *   The **MCP (Model Context Protocol) Server**, defined as the `prefect-mcp` service in `docker-compose.yml`, is a custom FastAPI application built from the `mcp/` directory. Its primary purpose is to provide a simplified, high-level API for interacting with the Prefect system.
-    *   Based on `mcp/main.py`, the MCP server exposes several tools:
-        *   `run_prefect_flow`: A generic tool to trigger any Prefect deployment by name with specified parameters.
-        *   `run_ntfy_notification`: A convenience tool that specifically triggers the `ntfy` notification flow.
-        *   `list_prefect_deployments`: A tool to list all available deployments in the Prefect server.
-        *   `get_deployment_parameters`: A tool to retrieve the parameters for a specific deployment.
-
-*   **Interaction with Other Components:**
-    *   The MCP server acts as a bridge or an abstraction layer. It communicates directly with the **Prefect Server's API** to trigger flow runs and query deployment information. By calling the `run_ntfy_notification` tool on the MCP server, a user can initiate the entire notification workflow:
-        1.  The MCP server receives the request.
-        2.  It calls the Prefect Server's API to create a new flow run for the `ntfy_default` deployment.
-        3.  The Prefect Server schedules the run.
-        4.  The Prefect Worker picks up and executes the flow.
-        5.  The flow sends a notification to the `ntfy` server.
-
-### **Overall System Interaction**
-
-The components form a cohesive, event-driven system:
+* Postgres Database: this stores all the persistent state for Prefect.
+* Prefect Server: this handles all the metadata and the engine, particularly blocks and configuration for flows.
+* Prefect Worker: this handles the running of flow deployments.
+* MinIO: this handles the storage of flow code (other options are git repos and docker images).
+* MCP: this exposes a targeted subset of workflow functionality to an LLM.
+* ntfy: this is a notification service that goes ping, and can send messages to iPhone or Android.
 
 ```mermaid
 graph TD
@@ -67,36 +50,21 @@ graph TD
         F[Subscribed Devices]
     end
 
-    A -- "1. Calls 'run_ntfy_notification' tool" --> B
-    B -- "2. Creates flow run via API" --> C
-    C -- "3. Schedules run in work pool" --> D
-    D -- "4. Executes ntfy_default flow" --> E
-    E -- "5. Pushes notification" --> F
+    A -- "Calls 'run_ntfy_notification' tool" --> B
+    B -- "Creates flow run via API" --> C
+    C -- "Schedules run in work pool" --> D
+    D -- "Executes ntfy_default flow" --> E
+    E -- "Pushes notification" --> F
     D -- "Reports status" --> C
 ```
 
-In summary, a user interacts with the high-level MCP Server, which translates the request into a Prefect flow run. The Prefect Server and Worker handle the orchestration and execution, and the `ntfy` service delivers the final notification. This architecture separates concerns, making the system modular and extensible.
+## Flow Deployment
 
----
+Flows are a bit confusing, because although they exist as python code, they are designed to run as jobs.  From a very high level view, it works as follows:
 
-### **MinIO Storage for Flow Code**
-
-This project uses **MinIO** as a remote, S3-compatible object store for flow source code. This decouples the flow code from the execution environment, allowing workers to dynamically fetch and execute the correct version of a flow without needing the code to be pre-baked into their images.
-
-*   **Storage Configuration:**
-    *   The [`prefect/init_minio_blocks.py`](prefect/init_minio_blocks.py) script creates a Prefect `S3Bucket` block named `minio-prefect-flows`. This block is configured to connect to the `minio` service and use the `prefect-flows` bucket, which is automatically created by the `minio-init` service in [`docker-compose.yml`](docker-compose.yml).
-
-*   **Code Push on Deployment:**
-    *   When a flow is deployed (e.g., by running `prefect deploy --all`), the `push` step defined in [`prefect/prefect.yaml`](prefect/prefect.yaml) is executed.
-    *   This step uses the `prefect_aws.deployments.steps.push_to_s3` function, which references the `minio-prefect-flows` block. It packages the flow's source code (e.g., [`prefect/ntfy_flow.py`](prefect/ntfy_flow.py)) and uploads it to the `prefect-flows` bucket in MinIO.
-
-*   **Code Pull on Execution:**
-    *   When the Prefect Server schedules a flow run, it instructs a worker to execute it.
-    *   Before running the flow, the worker executes the `pull` steps defined in [`prefect/prefect.yaml`](prefect/prefect.yaml).
-    *   The `prefect_aws.deployments.steps.pull_from_s3` function is called, which again uses the `minio-prefect-flows` block to download the correct flow code from the MinIO bucket into the worker's local filesystem.
-    *   Once the code is downloaded, the worker executes it.
-
-This entire process is illustrated below:
+* A flow is a template.  You write a flow as a python method, and it can have tasks and even have transaction semantics and rollback on failure.
+* A deployment is when a flow is pushed out to flow storage (MinIO in this case), and is runnable by a worker. A deployment may run in response to events, or may run on a scheduled basis.
+* A run of a deployment is a job that goes into the "run queue" and is picked up by a prefect worker.  In this case, a prefect worker is a docker container that pulls the flow from MinIO and executes it, posting the result and recording the exit status.
 
 ```mermaid
 sequenceDiagram
