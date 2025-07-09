@@ -2,7 +2,7 @@
 
 This project is an "out of the box" notification system orchestrated by [Prefect](https://prefect.io), with a custom MCP server providing an API to trigger notifications via [ntfy.sh](https://ntfy.sh/), using Docker Compose.
 
-Leveraging a workflow system is useful when you want to have your agent or LLM take actions in response to events, or on a scheduled basis, and notify you proactively.
+Leveraging a workflow system is useful when you want to have your agent or LLM take actions in response to events, or on a scheduled basis, and notify you proactively.  It is perfectly practical to set up cron jobs every day -- for example, [this AI assistant that does scheduled jobs every day](https://www.geoffreylitt.com/2025/04/12/how-i-made-a-useful-ai-assistant-with-one-sqlite-table-and-a-handful-of-cron-jobs) -- but what if you have a batch encoding job that needs monitoring, or a number of tasks that are only valid for a limited time?  Having the LLM be able to create its own workflows and set up its own cron jobs and reminders would be ideal, and that's exactly what a workflow system does.
 
 Prefect is great as a workflow system, because flows are written and stored in Python code, and can be scheduled and run in various complex ways.  It is straightforward to store flows in source control, and flows and tasks are not limited to the directed acyclic graph (DAG) model.
 

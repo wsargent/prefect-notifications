@@ -7,6 +7,7 @@ Creates and registers all MinIO-related blocks with Prefect server.
 import sys
 import time
 import asyncio
+import os
 from prefect import get_client
 from prefect.blocks.core import Block
 from prefect_aws import AwsCredentials
@@ -62,14 +63,14 @@ def create_minio_credentials():
     try:
         # Create MinIO credentials using AWS credentials block
         minio_credentials = AwsCredentials(
-            aws_access_key_id="minioadmin",
-            aws_secret_access_key="minioadmin123",
-            region_name="us-east-1"
+            aws_access_key_id=os.environ["MINIO_ACCESS_KEY"],
+            aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
+            region_name=os.environ["MINIO_REGION"]
         )
         
         # Configure endpoint for MinIO
         minio_credentials.aws_client_parameters = {
-            "endpoint_url": "http://minio:9000"
+            "endpoint_url": os.environ["MINIO_ENDPOINT"]
         }
         
         # Save the credentials block
@@ -111,33 +112,6 @@ def create_s3_bucket_blocks(credentials):
     
     return created_blocks
 
-def create_result_storage_blocks(credentials):
-    """Create result and artifacts storage blocks."""
-    print("\n💾 Creating result storage blocks...")
-    
-    try:
-        # Create result storage bucket block
-        result_storage = S3Bucket(
-            bucket_name="prefect-results",
-            credentials=credentials,
-            folder="flow-results"
-        )
-        result_storage.save("minio-result-storage", overwrite=True)
-        print("✅ Result storage block created: minio-result-storage")
-        
-        # Create artifacts storage bucket block
-        artifacts_storage = S3Bucket(
-            bucket_name="prefect-artifacts",
-            credentials=credentials,
-            folder="flow-artifacts"
-        )
-        artifacts_storage.save("minio-artifacts-storage", overwrite=True)
-        print("✅ Artifacts storage block created: minio-artifacts-storage")
-        
-        return True
-    except Exception as e:
-        print(f"❌ Failed to create result storage blocks: {e}")
-        return False
 
 def verify_blocks():
     """Verify that all blocks were created successfully."""
@@ -147,9 +121,7 @@ def verify_blocks():
         "minio-credentials",
         "minio-prefect-flows",
         "minio-prefect-artifacts", 
-        "minio-prefect-results",
-        "minio-result-storage",
-        "minio-artifacts-storage"
+        "minio-prefect-results"
     ]
     
     verified_blocks = []
@@ -158,9 +130,9 @@ def verify_blocks():
         try:
             # Try to load each block
             if "credentials" in block_name:
-                block = AwsCredentials.load(block_name)
+                AwsCredentials.load(block_name)
             else:
-                block = S3Bucket.load(block_name)
+                S3Bucket.load(block_name)
             
             verified_blocks.append(block_name)
             print(f"✅ Verified block: {block_name}")
@@ -197,11 +169,6 @@ def main():
         print("❌ Failed to create S3 bucket blocks")
         sys.exit(1)
     
-    # Create result storage blocks
-    if not create_result_storage_blocks(credentials):
-        print("❌ Failed to create result storage blocks")
-        sys.exit(1)
-    
     # Verify all blocks
     if verify_blocks():
         print("\n🎉 All MinIO blocks created and verified successfully!")
@@ -210,8 +177,6 @@ def main():
         print("- minio-prefect-flows (S3 bucket for flow code)")
         print("- minio-prefect-artifacts (S3 bucket for artifacts)")
         print("- minio-prefect-results (S3 bucket for results)")
-        print("- minio-result-storage (Configured result storage)")
-        print("- minio-artifacts-storage (Configured artifacts storage)")
         print("\nMinIO integration is ready for use!")
     else:
         print("❌ Some blocks failed verification")

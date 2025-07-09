@@ -1,4 +1,23 @@
 
+x-minio-credentials: &minio-credentials
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin123
+  MINIO_REGION: us-east-1
+
+x-postgres-credentials: &postgres-credentials
+  POSTGRES_USER: prefect
+  POSTGRES_PASSWORD: prefect
+  POSTGRES_DB: prefect
+  PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@postgres:5432/prefect      
+
+x-minio-root-credentials: &minio-root-credentials
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin123
+
+x-prefect-container: &prefect-container
+  image: prefecthq/prefect:3-latest  
+
 services:
 
   ############################################
@@ -9,9 +28,7 @@ services:
     image: postgres:15-alpine
     restart: always
     environment:
-      POSTGRES_USER: prefect
-      POSTGRES_PASSWORD: prefect
-      POSTGRES_DB: prefect
+      <<: *postgres-credentials
     ports:
       - "5432:5432"
     volumes:
@@ -19,20 +36,14 @@ services:
 
   prefect:
     container_name: prefect
-    image: prefecthq/prefect:3-latest
+    <<: *prefect-container
     restart: always
     environment:
       PREFECT_HOME: /data
-      PREFECT_SERVER_API_HOST: "0.0.0.0"
-      PREFECT_DEBUG_MODE: "false"
-      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@postgres:5432/prefect
       PREFECT_API_URL: http://localhost:4200/api
+      PREFECT_SERVER_API_HOST: "0.0.0.0"
       EXTRA_PIP_PACKAGES: prefect-aws
-      # MinIO configuration for Prefect
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
-      MINIO_REGION: us-east-1
+      <<: [*postgres-credentials, *minio-credentials]
     command: |
       sh -c "
         pip install prefect-aws &&
@@ -44,45 +55,35 @@ services:
         (prefect work-pool create default-docker-pool --type docker || echo 'Work pool already exists')
         prefect work-pool update default-docker-pool --base-job-template /app/prefect/work-pool-template.json        
         echo 'Deploying flows...'
-        /app/prefect/init_flow.sh
+        prefect deploy --all
         wait $$SERVER_PID
       "
     ports:
-      - "4200:4200"  # Prefect server UI and API
+      - "4200:4200"
     volumes:
-      - prefect-data:/data  # Persistent storage
+      - prefect-data:/data 
       - ./prefect:/app/prefect
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health/')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://prefect:4200/api/health/')"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 60s
   
   prefect-worker:
-    image: prefecthq/prefect:3-latest
+    <<: *prefect-container
     restart: always
     environment:
-      - PREFECT_API_URL=http://prefect:4200/api
-      - PREFECT_DEBUG_MODE=false
-      # MinIO configuration for worker
-      - MINIO_ENDPOINT=http://minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
-      - MINIO_REGION=us-east-1
+      EXTRA_PIP_PACKAGES: prefect-aws prefect-docker
+      PREFECT_API_URL: http://prefect:4200/api
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./prefect:/app/prefect
+    command: prefect worker start --pool default-docker-pool --type docker
     depends_on:
       prefect:
         condition: service_healthy
-    command: >
-      sh -c "
-        pip install prefect-docker &&
-        echo 'Starting worker...' &&
-        prefect worker start --pool default-docker-pool --type docker
-      "
-
+      
   # MinIO for S3-compatible storage
   minio:
     image: quay.io/minio/minio:latest
@@ -90,13 +91,12 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin123
+      <<: *minio-root-credentials
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://minio:9000/minio/health/live"]
       interval: 30s
       retries: 3
       start_period: 20s
@@ -109,8 +109,7 @@ services:
       minio:
         condition: service_healthy
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin123
+      <<: *minio-root-credentials
     entrypoint: >
       /bin/sh -c "
       echo 'Waiting for MinIO to be ready...';
