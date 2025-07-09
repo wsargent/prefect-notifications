@@ -1,6 +1,6 @@
 # Prefect Notifications
 
-This project is an "out of the box" notification system orchestrated by [Prefect](https://prefect.io), with a custom MCP server providing an API to trigger notifications and manage deployments, using Docker Compose.
+This project is an "out of the box" notification system orchestrated by [Prefect](https://prefect.io), with a custom MCP server providing an API to trigger notifications via [ntfy.sh](https://ntfy.sh/), using Docker Compose.
 
 Leveraging a workflow system is useful when you want to have your agent or LLM take actions in response to events, or on a scheduled basis, and notify you proactively.
 
@@ -12,11 +12,11 @@ Prefect is great as a workflow system, because flows are written and stored in P
 docker compose up --build
 ```
 
-You can inspect the running services:
+You can inspect the running services on localhost:
 
 * [Prefect Admin UI](http://localhost:4200)
 * [MinIO UI](http://localhost:9000)
-* [ntfy](http://localhost)
+* [ntfy UI](http://localhost)
 * The MCP server is available at http://localhost:8000/sse and you can access it with [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) or [Context](https://github.com/indragiek/Context).
 
 ## Configuration
