@@ -1,88 +1,59 @@
-# Prefect Notifications
+# Prefect Notifications with ntfy
 
-https://github.com/rpeden/prefect-docker-compose
+This project demonstrates how to integrate Prefect with the [ntfy.sh](https://ntfy.sh/) notification service. It includes scripts to initialize Prefect blocks, deploy flows, and send notifications.
 
-## Set Prefect Server
+## Overview
 
-Configure prefect to use this server:
+The integration works as follows:
 
-```
-(.venv) ❱ prefect config set PREFECT_API_URL=https://localhost:4200/api
-```
+1.  A custom `NtfyWebHook` block is registered with Prefect. This block is a specialized version of the `AppriseNotificationBlock` and is defined in [`ntfy_webhook.py`](prefect/ntfy_webhook.py:1).
+2.  The [`init_blocks.sh`](prefect/init_blocks.sh:1) script initializes the necessary Prefect blocks. It first initializes MinIO blocks by running [`init_minio_blocks.py`](prefect/init_minio_blocks.py:1), then registers the `NtfyWebHook` block, and finally creates two instances of this block:
+    *   `ntfy-default`: Sends notifications to the `default` topic in ntfy.
+    *   `ntfy-failure`: Sends notifications to the `failure` topic in ntfy.
+3.  The [`ntfy_flow.py`](prefect/ntfy_flow.py:1) file defines the `ntfy_default` flow. This flow loads the `ntfy-default` block and uses it to send a notification.
+4.  The [`init_flow.sh`](prefect/init_flow.sh:1) script deploys all the flows found in the project using `prefect deploy --all`. This makes the `ntfy_default` flow available in the Prefect UI.
 
-## NTFY Block
+## Setup
 
-https://docs.prefect.io/v3/concepts/blocks#blocks
-https://docs.prefect.io/v3/advanced/custom-blocks 
+To get started, you need to have Prefect and Docker installed.
 
-To register the ntfy webhook block type:
+### 1. Configure Prefect Server
 
-```
-(.venv) ❱ prefect block register --file ntfy_webhook.py
-```
+Configure your Prefect client to communicate with the local Prefect server running in Docker:
 
-And then you can create a new block with
-
-```
-(.venv) ❱ prefect block create ntfy-webhook
-Create a ntfy-webhook block: http://127.0.0.1:4200/blocks/catalog/ntfy-webhook/create
+```bash
+prefect config set PREFECT_API_URL=http://localhost:4200/api
 ```
 
-This will give you a link to the server URL which will have the ntfy endpoint and topic to use.
+### 2. Initialize Blocks and Flows
 
-## Set up Topic
+The `docker-compose.yml` file is configured to automatically run the initialization scripts. When you start the services with `docker-compose up`, the `prefect-worker` service will execute the following scripts in order:
 
-Because it's using apprise under the hood, you want this https://github.com/caronc/apprise/wiki/Notify_ntfy
-to use the various options in the scheme i.e. 
+1.  **[`init_blocks.sh`](prefect/init_blocks.sh:1):**
+    *   Registers the `NtfyWebHook` block from [`ntfy_webhook.py`](prefect/ntfy_webhook.py:1).
+    *   Creates the `ntfy-default` and `ntfy-failure` notification blocks.
 
-```
-Name: "ntfy-alerts"
-Webhook URL: ntfys://ntfy-proxmox.mytailnet.ts.net/alerts
-```
+2.  **[`init_flow.sh`](prefect/init_flow.sh:1):**
+    *   Deploys the `ntfy_default` flow from [`ntfy_flow.py`](prefect/ntfy_flow.py:1).
 
-```
-(.venv) ❱ prefect block ls
-                                                 Blocks
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID                                   ┃ Type         ┃ Name            ┃ Slug                         ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ d99fb3cf-a585-4307-8886-894e2fc33d94 │ Ntfy Webhook │ my-ntfy-webhook │ ntfy-webhook/my-ntfy-webhook │
-└──────────────────────────────────────┴──────────────┴─────────────────┴──────────────────────────────┘
-```
+### 3. Sending Notifications
 
-## Creating a Flow
+Once the services are running and the flow is deployed, you can trigger the `ntfy_default` flow from the Prefect UI or the command line. This will send a notification to the `default` topic in your ntfy instance.
 
-Once you have the block listed, you can create a flow:
+## Scripts
 
-```python
-from prefect import flow
-from typing import Optional
+*   **[`init_blocks.sh`](prefect/init_blocks.sh:1):** This script sets up the necessary notification blocks in Prefect. It registers the custom `NtfyWebHook` block and creates two instances, one for default notifications and one for failure notifications.
+*   **[`init_flow.sh`](prefect/init_flow.sh:1):** This script deploys the Prefect flows. It uses `prefect deploy --all` to find and deploy all flows in the project.
+*   **[`ntfy_webhook.py`](prefect/ntfy_webhook.py:1):** This Python script defines the custom `NtfyWebHook` block, which inherits from `AppriseNotificationBlock` to provide ntfy integration.
+*   **[`ntfy_flow.py`](prefect/ntfy_flow.py:1):** This script contains the main Prefect flow, `ntfy_default`, which demonstrates how to load the `NtfyWebHook` block and send a notification.
+*   **[`init_minio_blocks.py`](prefect/init_minio_blocks.py:1):** This script is responsible for setting up the MinIO storage blocks that Prefect uses for storing flow code.
 
-from datetime import datetime
+## ntfy Integration
 
-from ntfy_webhook import NtfyWebHook
+The integration with ntfy is handled by the `NtfyWebHook` block, which is built on top of Prefect's `AppriseNotificationBlock`. Apprise is a library that supports a wide variety of notification services, including ntfy.
 
-@flow
-def ntfy_default(body: str, subject: Optional[str] = None):  
-    """Flow that sends notifications via ntfy"""
-    # Load the saved webhook
-    ntfy_webhook = NtfyWebHook.load("ntfy-default")  
-    # Send notification
-    ntfy_webhook.notify(body, subject=subject)
-```
+The `url` provided when creating the `NtfyWebHook` block is an Apprise-compatible URL, for example: `ntfy://ntfy:80/default`.
 
-## Deploying
-
-You can create a deployment of the flow by creating a deployment, which will push the code to MinIO, a S3-compatible [blob storage](https://docs.prefect.io/v3/how-to-guides/deployments/store-flow-code#blob-storage) system.
-
-https://docs.prefect.io/v3/how-to-guides/deployments/prefect-yaml
-
-```
-push:
-- prefect_aws.deployments.steps.push_to_s3:
-    requires: prefect-aws>=0.3.0
-    bucket: my-bucket
-    folder: project-name
-    credentials: "{{ prefect.blocks.aws-credentials.dev-credentials }}"
-```
-
+*   `ntfy://`: The protocol for the ntfy service.
+*   `ntfy:80`: The hostname and port of the nfy server.
+*   `default`: The ntfy topic to which the notification will be sent.
