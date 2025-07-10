@@ -63,8 +63,10 @@ graph TD
 Flows are a bit confusing, because although they exist as python code, they are designed to run as jobs.  From a very high level view, it works as follows:
 
 * A flow is a template.  You write a flow as a python method, and it can have tasks and even have transaction semantics and rollback on failure.
+* A flow can use blocks, which are hooks into existing functionality.  In this case, we define a custom ntfy block and register it.  Because Prefect uses Apprise internally, we can leverage the apprise functionality and the only thing we need to do is set `ntfy://ntfy:80/default` as the URL per the [documentation](https://github.com/caronc/apprise/wiki/Notify_ntfy) and save it as `ntfy-default` so that flows can use it.
 * A deployment is when a flow is pushed out to flow storage (MinIO in this case), and is runnable by a worker. A deployment may run in response to events, or may run on a scheduled basis.
 * A run of a deployment is a job that goes into the "run queue" and is picked up by a prefect worker.  In this case, a prefect worker is a docker container that pulls the flow from MinIO and executes it, posting the result and recording the exit status.
+
 
 ```mermaid
 sequenceDiagram
