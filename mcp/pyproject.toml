@@ -4,8 +4,43 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
+
 dependencies = [
     "fastmcp>=2.10.2",
     "prefect>=3.0.0",
-    "rich>=14.0.0",
+    "rich>=14.0.0"
 ]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "ruff>=0.11.11",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+]
+
+[tool.ruff]
+# https://docs.astral.sh/ruff/linter/#rule-selection
+lint.select = [
+    "E", # pycodestyle
+    "F", # Pyflakes
+    "I", # isort
+    #"B",  # flake8-bugbear
+    #"SIM", # flake8-simplify
+]
+line-length = 250
+
+# To automatically remove unused imports when fixing
+fix = true
+
+[tool.ruff.lint.isort]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+
+# https://mypy.readthedocs.io/en/stable/config_file.html#example-pyproject-toml
+[tool.mypy]
+python_version = "3.12"
+# https://mypy.readthedocs.io/en/stable/existing_code.html
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
