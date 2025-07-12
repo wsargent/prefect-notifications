@@ -10,16 +10,15 @@ MCP server for doing stuff
 # ]
 # ///
 
-from typing import Any, Dict
-from typing import Optional
-
-import os
 import base64
 import json
+import traceback
+from typing import Any, Dict, Optional
+from uuid import UUID
 
-from fastmcp.utilities.logging import get_logger
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ResourceError
+from fastmcp.utilities.logging import get_logger
 from prefect import get_client
 from prefect.client.schemas.filters import (
     DeploymentFilter,
@@ -35,15 +34,11 @@ from prefect.client.schemas.filters import (
 )
 from prefect.client.schemas.objects import StateType
 from prefect.states import Cancelled
-import traceback
-
-from uuid import UUID
-
 
 mcp = FastMCP("prefect-mcp")
 
 # Enable debug logging
-os.environ["FASTMCP_LOG_LEVEL"] = "DEBUG"
+# os.environ["FASTMCP_LOG_LEVEL"] = "DEBUG"
 
 logger = get_logger(__name__)
 
@@ -109,7 +104,12 @@ def get_request_uri(ctx: Context) -> str | None:
     return None
 
 
-@mcp.resource("prefect://flows", name="list_flows", description="List and search flows with query parameters")
+@mcp.resource(
+    uri="prefect://flows",
+    name="list_flows",
+    description="List and search flows with query parameters",
+    mime_type="application/json"
+)
 async def list_flows_resource(ctx: Context):
     """List all available Prefect flows with filtering and cursor-based pagination.
 
@@ -190,7 +190,7 @@ async def list_flows_resource(ctx: Context):
                 "flows": [flow.model_dump() for flow in flows],
                 "count": len(flows),
                 "filters": {"query": query, "name": name, "tags": tags.split(",") if tags else None},
-                "pagination": {"offset": offset, "page_size": page_size, "has_more": has_more},
+                "has_more": has_more,
             }
 
             # Add nextCursor if more results exist (MCP-compliant)
@@ -202,7 +202,11 @@ async def list_flows_resource(ctx: Context):
     return await safe_prefect_operation(ctx, "list_flows", operation)
 
 
-@mcp.resource("prefect://flows/{id}")
+@mcp.resource(
+    uri="prefect://flows/{id}",
+    description="Get a specific flow by its ID",
+    mime_type="application/json"
+)
 async def get_flow_by_id_resource(ctx: Context, id: str):
     """Get a specific flow by its ID."""
     await ctx.debug(f"get_flow_by_id_resource: id={id}")
@@ -223,7 +227,12 @@ async def get_flow_by_id_resource(ctx: Context, id: str):
 # ------------------------------------------------------------------------
 
 
-@mcp.resource("prefect://deployments", name="list_deployments", description="List and search deployments with query parameters")
+@mcp.resource(
+    uri="prefect://deployments",
+    name="list_deployments",
+    description="List and search deployments with query parameters",
+    mime_type="application/json"
+)
 async def list_deployments_resource(ctx: Context):
     """List all available Prefect deployments with filtering and cursor-based pagination.
 
@@ -313,7 +322,12 @@ async def list_deployments_resource(ctx: Context):
                 deployment_info["flow_name"] = flow_name
                 deployment_list.append(deployment_info)
 
-            result = {"deployments": deployment_list, "count": len(deployment_list), "filters": {"query": query, "flow_id": flow_id, "status": status}, "pagination": {"offset": offset, "page_size": page_size, "has_more": has_more}}
+            result = {
+                "deployments": deployment_list, 
+                "count": len(deployment_list), 
+                "filters": {"query": query, "flow_id": flow_id, "status": status}, 
+                "has_more": has_more
+            }
 
             # Add nextCursor if more results exist (MCP-compliant)
             if next_cursor:
@@ -324,7 +338,11 @@ async def list_deployments_resource(ctx: Context):
     return await safe_prefect_operation(ctx, "list_deployments", operation)
 
 
-@mcp.resource("prefect://deployments/{id}")
+@mcp.resource(
+    uri="prefect://deployments/{id}",
+    description="Get a specific deployment by its ID",
+    mime_type="application/json"
+)
 async def get_deployment_by_id_resource(ctx: Context, id: str):
     """Get a specific deployment by its ID."""
     await ctx.debug(f"get_deployment_by_id_resource: id={id}")
@@ -357,7 +375,12 @@ async def get_deployment_by_id_resource(ctx: Context, id: str):
 # ------------------------------------------------------------------------
 
 
-@mcp.resource("prefect://flow-runs", name="list_flow_runs", description="List and search flow runs with query parameters")
+@mcp.resource(
+    uri="prefect://flow-runs",
+    name="list_flow_runs",
+    description="List and search flow runs with query parameters",
+    mime_type="application/json"
+)
 async def list_flow_runs_resource(ctx: Context):
     """List all available Prefect flow runs with filtering and cursor-based pagination.
 
@@ -446,7 +469,7 @@ async def list_flow_runs_resource(ctx: Context):
                 "flow_runs": [flow_run.model_dump() for flow_run in flow_runs],
                 "count": len(flow_runs),
                 "filters": {"flow_id": flow_id, "deployment_id": deployment_id, "state_type": state_type, "state_name": state_name},
-                "pagination": {"offset": offset, "page_size": page_size, "has_more": has_more},
+                "has_more": has_more,
             }
 
             # Add nextCursor if more results exist (MCP-compliant)
@@ -458,7 +481,11 @@ async def list_flow_runs_resource(ctx: Context):
     return await safe_prefect_operation(ctx, "list_flow_runs", operation)
 
 
-@mcp.resource("prefect://flow-runs/{id}")
+@mcp.resource(
+    uri="prefect://flow-runs/{id}",
+    description="Get a specific flow run by its ID",
+    mime_type="application/json"
+)
 async def get_flow_run_by_id_resource(ctx: Context, id: str):
     """Get a specific flow run by its ID."""
     await ctx.debug(f"get_flow_run_by_id_resource: id={id}")
@@ -618,4 +645,19 @@ async def create_flow_run_from_deployment(
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host="localhost", port=8000, log_level="DEBUG")
+    # Configure for I/O-bound workloads (Prefect API calls)
+    uvicorn_config = {
+        "workers": 1,  # Single worker - async handles concurrency better for I/O
+        "limit_concurrency": 500,  # High concurrent connections for I/O operations
+        "backlog": 8192,  # Large backlog for many pending connections
+        "timeout_keep_alive": 30,  # Longer keep-alive for connection reuse
+        "timeout_graceful_shutdown": 30,  # Graceful shutdown timeout
+    }
+    
+    mcp.run(
+        transport="http", 
+        host="localhost", 
+        port=8000, 
+        log_level="DEBUG",
+        uvicorn_config=uvicorn_config
+    )
