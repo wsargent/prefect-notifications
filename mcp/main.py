@@ -16,12 +16,11 @@ import json
 import traceback
 from typing import Any, Dict, Optional
 from uuid import UUID
-import dateparser
 
+import parsedatetime
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ResourceError
 from fastmcp.utilities.logging import get_logger
-import parsedatetime
 from prefect import get_client
 from prefect.client.schemas.filters import (
     DeploymentFilter,
@@ -38,7 +37,7 @@ from prefect.client.schemas.filters import (
     FlowRunFilterStateName,
     FlowRunFilterStateType,
 )
-from prefect.client.schemas.objects import StateType
+from prefect.client.schemas.objects import FlowRun, StateType
 from prefect.states import Cancelled
 
 mcp = FastMCP("prefect-mcp")
@@ -442,6 +441,41 @@ async def get_flow_run_by_id(ctx: Context, flow_run_id: str) -> Dict[str, Any]:
             return {"flow_run": flow_run.model_dump()}
 
     return await safe_prefect_operation(ctx, "get_flow_run_by_id_tool", operation)
+
+@mcp.tool()
+async def bulk_cancel_flow_runs(ctx: Context):
+    async def list_flow_runs_with_states(states: list[str]) -> list[FlowRun]:
+        async with get_client() as client:
+            return await client.read_flow_runs(
+                flow_run_filter=FlowRunFilter(
+                    state=FlowRunFilterState(
+                        name=FlowRunFilterStateName(any_=states)
+                    )
+                )
+            )
+    
+    async def cancel_flow_runs(flow_runs: list[FlowRun]):
+        async with get_client() as client:
+            for flow_run in flow_runs:
+                if flow_run.state:
+                    state = flow_run.state.model_copy(
+                        update={"name": "Cancelled", "type": StateType.CANCELLED}
+                    )
+                    await client.set_flow_run_state(flow_run.id, state, force=True)
+
+    await ctx.debug("bulk_cancel_flow_runs entry")
+
+    states = ["Pending", "Running", "Scheduled", "Late"]
+    flow_runs = await list_flow_runs_with_states(states)
+
+    while flow_runs:
+        print(f"Cancelling {len(flow_runs)} flow runs")
+        await cancel_flow_runs(flow_runs)
+        flow_runs = await list_flow_runs_with_states(states)
+
+    await ctx.debug("bulk_cancel_flow_runs exit")
+    result = {"success": True}
+    return result
 
 @mcp.tool()
 async def cancel_flow_run(ctx: Context, flow_run_id: str) -> Dict[str, Any]:
