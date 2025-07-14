@@ -557,8 +557,8 @@ async def create_flow_run_from_deployment(
             flow_run_name=name
         )
 
-        result = {"flow_run_id": str(run_result)}
-        await ctx.debug(f"create_flow_run_from_deployment exit: flow_run_id={run_result}")
+        result = {"flow_run_id": str(run_result.id)}
+        await ctx.debug(f"create_flow_run_from_deployment exit: flow_run_id={run_result.id}")
         return result
     except Exception:
         await ctx.error(f"Failed to create flow run: {traceback.format_exc()}", "create_flow_run_from_deployment")
