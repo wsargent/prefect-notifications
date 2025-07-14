@@ -18,7 +18,7 @@ from prefect.client.schemas.objects import Flow, Deployment, FlowRun, StateType
 from prefect.client.schemas.filters import FlowFilter, FlowFilterName, FlowFilterTags
 
 # Import the FastMCP server instance and related modules
-from prefect_mcp.server import mcp
+from main import mcp
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ class TestFlowResources:
     """Test Phase 1: Flow Resources."""
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_list_flows_resource_no_params(self, mock_get_client, sample_flow, mock_async_client):
         """Test prefect://flows resource with no query parameters using the client."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -76,14 +76,14 @@ class TestFlowResources:
             assert kwargs["limit"] == 21  # It requests one more to check for next page
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_flows_resource_with_query(self, mock_get_client, mock_get_uri, sample_flow, mock_async_client):
         """Test list_flows_resource function with query parameter parsing."""
         mock_client, mock_get_client_cm = mock_async_client
         mock_client.read_flows.return_value = [sample_flow]
         mock_get_client.return_value = mock_get_client_cm
-        mock_get_uri.return_value = "prefect://flows?query=test"
+        mock_get_uri.return_value = "prefect://flows?name=test"
 
         # Get the actual resource function from the FastMCP server
         resource_manager = mcp._resource_manager
@@ -101,15 +101,15 @@ class TestFlowResources:
         # Test the resource function directly
         data = await resource_func(mock_ctx)
 
-        assert data["filters"]["query"] == "test"
+        assert data["filters"]["name"] == "test"
         mock_client.read_flows.assert_called_once()
         _, kwargs = mock_client.read_flows.call_args
         assert isinstance(kwargs["flow_filter"], FlowFilter)
         assert kwargs["flow_filter"].name == FlowFilterName(like_="test")
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_flows_resource_with_tags(self, mock_get_client, mock_get_uri, sample_flow, mock_async_client):
         """Test list_flows_resource function with tags parameter parsing."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -136,8 +136,8 @@ class TestFlowResources:
         assert kwargs["flow_filter"].tags == FlowFilterTags(all_=["foo", "bar"])
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_flows_pagination(self, mock_get_client, mock_get_uri, sample_flow, mock_async_client):
         """Test cursor-based pagination for list_flows_resource."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -169,10 +169,10 @@ class TestFlowResources:
 
         assert "nextCursor" not in data2
         assert len(data2["flows"]) == 1
-        assert data2["pagination"]["offset"] == 20
+        assert data2["has_more"] == False
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_get_flow_by_id_resource(self, mock_get_client, sample_flow, mock_async_client):
         """Test get_flow_by_id_resource function."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -191,7 +191,7 @@ class TestFlowResources:
             mock_client.read_flow.assert_called_once_with(UUID(flow_id))
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_get_flow_by_id_resource_not_found(self, mock_get_client, mock_async_client):
         """Test get_flow_by_id_resource for a non-existent flow."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -221,7 +221,7 @@ class TestFlowResources:
             assert all(template in actual_templates for template in expected_templates), f"Missing templates. Expected: {expected_templates}, Got: {actual_templates}"
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_list_flows_resource_content_structure(self, mock_get_client, sample_flow, mock_async_client):
         """Test that flow list resource returns properly structured content."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -237,7 +237,7 @@ class TestFlowResources:
             assert "flows" in data
             assert "count" in data
             assert "filters" in data
-            assert "pagination" in data
+            assert "has_more" in data
 
             # Verify flow structure
             assert len(data["flows"]) == 1
@@ -247,7 +247,7 @@ class TestFlowResources:
             assert "tags" in flow_data
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_get_flow_by_id_invalid_uuid(self, mock_get_client, mock_async_client):
         """Test error handling for invalid UUID in flow resource."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -262,7 +262,7 @@ class TestDeploymentResources:
     """Test Phase 2: Deployment Resources."""
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_list_deployments_resource_no_params(self, mock_get_client, sample_deployment, sample_flow, mock_async_client):
         """Test prefect://deployments resource with no query parameters."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -281,15 +281,15 @@ class TestDeploymentResources:
             mock_client.read_deployments.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_deployments_resource_with_query(self, mock_get_client, mock_get_uri, sample_deployment, sample_flow, mock_async_client):
         """Test list_deployments_resource function with query parameter parsing."""
         mock_client, mock_get_client_cm = mock_async_client
         mock_client.read_deployments.return_value = [sample_deployment]
         mock_client.read_flow.return_value = sample_flow
         mock_get_client.return_value = mock_get_client_cm
-        mock_get_uri.return_value = "prefect://deployments?query=test"
+        mock_get_uri.return_value = "prefect://deployments?name=test"
 
         # Get the actual resource function from the FastMCP server
         resource_manager = mcp._resource_manager
@@ -303,11 +303,11 @@ class TestDeploymentResources:
         mock_ctx = AsyncMock()
         data = await resource_func(mock_ctx)
 
-        assert data["filters"]["query"] == "test"
+        assert data["filters"]["name"] == "test"
         mock_client.read_deployments.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_get_deployment_by_id_resource(self, mock_get_client, sample_deployment, sample_flow, mock_async_client):
         """Test get_deployment_by_id_resource function."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -348,7 +348,7 @@ class TestFlowRunResources:
     """Test Phase 3: Flow Run Resources."""
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_list_flow_runs_resource_no_params(self, mock_get_client, sample_flow_run, mock_async_client):
         """Test prefect://flow-runs resource with no query parameters."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -365,8 +365,8 @@ class TestFlowRunResources:
             mock_client.read_flow_runs.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_flow_runs_resource_with_state_filter(self, mock_get_client, mock_get_uri, sample_flow_run, mock_async_client):
         """Test list_flow_runs_resource function with state filtering."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -390,8 +390,8 @@ class TestFlowRunResources:
         mock_client.read_flow_runs.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_request_uri")
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
     async def test_list_flow_runs_resource_with_flow_id_filter(self, mock_get_client, mock_get_uri, sample_flow_run, mock_async_client):
         """Test list_flow_runs_resource function with flow_id filtering."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -416,7 +416,7 @@ class TestFlowRunResources:
         mock_client.read_flow_runs.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("prefect_mcp.server.get_client")
+    @patch("main.get_client")
     async def test_get_flow_run_by_id_resource(self, mock_get_client, sample_flow_run, mock_async_client):
         """Test get_flow_run_by_id_resource function."""
         mock_client, mock_get_client_cm = mock_async_client
@@ -433,6 +433,38 @@ class TestFlowRunResources:
             assert "flow_run" in data
             assert data["flow_run"]["id"] == flow_run_id
             mock_client.read_flow_run.assert_called_once_with(UUID(flow_run_id))
+
+    @pytest.mark.asyncio
+    @patch("main.get_request_uri")
+    @patch("main.get_client")
+    async def test_list_flow_runs_resource_with_name_filter(self, mock_get_client, mock_get_uri, sample_flow_run, mock_async_client):
+        """Test list_flow_runs_resource function with name filtering."""
+        mock_client, mock_get_client_cm = mock_async_client
+        mock_client.read_flow_runs.return_value = [sample_flow_run]
+        mock_get_client.return_value = mock_get_client_cm
+        test_name = "test-run"
+        mock_get_uri.return_value = f"prefect://flow-runs?name={test_name}"
+
+        # Get the resource function directly
+        resource_manager = mcp._resource_manager
+        resource_func = None
+        for resource in resource_manager._resources.values():
+            if str(resource.uri) == "prefect://flow-runs":
+                resource_func = resource.fn
+                break
+
+        assert resource_func is not None, "Could not find flow-runs resource function"
+
+        # Create a mock context object
+        from unittest.mock import MagicMock
+        mock_ctx = MagicMock()
+        mock_ctx.debug = AsyncMock()
+        
+        # Call the resource function directly with mock context
+        result = await resource_func(mock_ctx)
+
+        assert result["filters"]["name"] == test_name
+        mock_client.read_flow_runs.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_flow_run_resources_listed(self):
