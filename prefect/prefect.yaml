@@ -14,17 +14,17 @@ push:
   - prefect_aws.deployments.steps.push_to_s3:
       bucket: "{{ prefect.blocks.s3-bucket.minio-prefect-flows.bucket_name }}"
       folder: ntfy-flow
+      requires: prefect-aws>=0.3.0
       credentials: "{{ prefect.blocks.aws-credentials.minio-credentials }}"
 
 # pull section allows you to provide instructions for cloning this project in remote locations
 pull:
-  - prefect.deployments.steps.run_shell_script:
-      script: |
-        pip install prefect-aws
-      stream_output: true
+  # Add prefect.deployments.steps.run_shell_script step for more complex setup
+      
   - prefect_aws.deployments.steps.pull_from_s3:
-      bucket: "{{ prefect.blocks.s3-bucket.minio-prefect-flows.bucket_name }}"
+      bucket: "{{ prefect.blocks.s3-bucket.minio-prefect-flows.bucket_name }}"    
       folder: ntfy-flow
+      requires: prefect-aws>=0.3.0
       credentials: "{{ prefect.blocks.aws-credentials.minio-credentials }}"
 
 # the deployments section allows you to provide configuration for deploying flows
